@@ -262,9 +262,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-1-5 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-1-6 ", reply_markup=admin_main_keyboard())
     else:
-        await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
+        await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید. جهت کسب اطلاعات، به کانال https://t.me/sbmu_med_info مراجعه کنید. ", reply_markup=user_main_keyboard(has_identity))
     persist_all()
     return S_MAIN
 
