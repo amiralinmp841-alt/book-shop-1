@@ -88,6 +88,20 @@ def save_json(path: Path, data):
 # --- 🔽 کد جدید برای ذخیره‌سازی ادمین‌ها ---
 ADMINS_FILE = DATA_DIR / "admins.json"
 admins = load_json(ADMINS_FILE, [])
+# --- 🔽 اضافه کردن OTHER_ADMINS از متغیر محیطی ---
+OTHER_ADMINS_ENV = os.getenv("OTHER_ADMINS_ID", "")
+
+if OTHER_ADMINS_ENV:
+    other_admins = [
+        int(uid.strip())
+        for uid in OTHER_ADMINS_ENV.split(",")
+        if uid.strip().isdigit()
+    ]
+
+    for uid in other_admins:
+        if uid not in admins:
+            admins.append(uid)
+# --- 🔼 پایان ---
 # --- 🔼 پایان کد جدید ---
 
 
@@ -109,30 +123,6 @@ def persist_all():
     save_json(ADMINS_FILE, admins)
     # --- 🔼 پایان تغییر ---
 
-
-# --- 🔽 کد جدید برای ذخیره‌سازی ادمین‌ها ---
-ADMINS_FILE = DATA_DIR / "admins.json"
-admins = load_json(ADMINS_FILE, [])
-# --- 🔼 پایان کد جدید ---
-
-
-users: Dict[str, dict] = load_json(USERS_FILE, {})
-products: Dict[str, dict] = load_json(PRODUCTS_FILE, {})
-orders: Dict[str, list] = load_json(ORDERS_FILE, {})  # orders per user (finalized, unpaid)
-pending_payments: Dict[str, dict] = load_json(PENDING_PAYMENTS_FILE, {})
-purchases: Dict[str, list] = load_json(PURCHASES_FILE, {})
-blocked: List[int] = load_json(BLOCKED_FILE, [])
-
-def persist_all():
-    save_json(USERS_FILE, users)
-    save_json(PRODUCTS_FILE, products)
-    save_json(ORDERS_FILE, orders)
-    save_json(PENDING_PAYMENTS_FILE, pending_payments)
-    save_json(PURCHASES_FILE, purchases)
-    save_json(BLOCKED_FILE, blocked)
-    # --- 🔽 ذخیره ادمین‌ها ---
-    save_json(ADMINS_FILE, admins)
-    # --- 🔼 پایان تغییر ---
 
 
 # --- 🔽 تابع کمکی برای تشخیص ادمین ---
@@ -266,7 +256,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-0-0 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-0-2 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
