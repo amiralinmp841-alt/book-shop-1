@@ -73,7 +73,10 @@ logger = logging.getLogger(__name__)
     S_ADMIN_DELETE_SELECT,
     S_ADMIN_BLOCK_ID,
     S_ADMIN_UNBLOCK_ID,
-) = range(16)
+    S_MANAGE_ADMINS,
+    S_ADD_ADMIN,
+    S_REMOVE_ADMIN,
+) = range(19)
 
 # ---------------- STORAGE HELPERS ----------------
 def load_json(path: Path, default):
@@ -259,7 +262,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-0-8 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-0-9 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -296,16 +299,6 @@ async def handle_text_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return S_MAIN
 
     # User flows
-    if text == "✏️ ویرایش اطلاعات هویتی":
-        key = str(uid)
-        old = users.get(key, {}).copy()
-        context.user_data['old_identity'] = old
-        users[key].update({"first_name": None, "last_name": None, "is_dorm": False, "dorm_name": None})
-        persist_all()
-        await update.message.reply_text("اطلاعات قبلی پاک شد. لطفا نام و نام خانوادگی جدید را وارد کنید:", reply_markup=back_kb())
-        return S_REGISTER_NAME
-
-
     if text == "📝 ثبت اطلاعات هویتی":
         await update.message.reply_text("لطفا نام و نام خانوادگی را (مثال: علی رضایی) وارد کنید:", reply_markup=back_kb())
         return S_REGISTER_NAME
@@ -449,11 +442,24 @@ async def handle_text_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 agg[keyt] = agg.get(keyt, 0) + it.get('qty', 0)
         # show aggregated grouped by title with color/bw counts
         summary = {}
+        
         for (title, typ), qty in agg.items():
             if title not in summary:
-                summary[title] = {"رنگی": 0, "سیاه و سفید": 0}
+                summary[title] = {
+                    "رنگی کیفیت بالا": 0,
+                    "رنگی کیفیت پایین": 0,
+                    "سیاه و سفید": 0
+                }
+        
             summary[title][typ] = summary[title].get(typ, 0) + qty
-        lines2 = [f"{t} : رنگی {v['رنگی']} - سیاه و سفید {v['سیاه و سفید']}" for t,v in summary.items()]
+        
+        lines2 = [
+            f"{t} : "
+            f"بالا {v['رنگی کیفیت بالا']} - "
+            f"پایین {v['رنگی کیفیت پایین']} - "
+            f"سیاه {v['سیاه و سفید']}"
+            for t, v in summary.items()
+        ]
         await update.message.reply_text("جزوات خریداری شده:\n\n" + "\n".join(lines2) + "\n\nجزئیات خریدها:\n\n" + "\n\n".join(lines), reply_markup=user_main_keyboard(has_identity))
         return S_MAIN
 
@@ -583,8 +589,19 @@ async def buy_select_product(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return S_MAIN
 
     # show options without price in button text to make matching robust; show price in prompt
-    price_info = f"قیمت رنگی: {p.get('color_price','-')} — سیاه و سفید: {p.get('bw_price','-')}"
-    kb = ReplyKeyboardMarkup([[f"🎨 رنگی", f"⬛ سیاه سفید"], ["🔙 بازگشت"]], resize_keyboard=True)
+    price_info = (
+        f"رنگی کیفیت بالا: {p.get('color_high_price','-')} — "
+        f"رنگی کیفیت پایین: {p.get('color_low_price','-')} — "
+        f"سیاه و سفید: {p.get('bw_price','-')}"
+    )
+    kb = ReplyKeyboardMarkup(
+        [
+            ["🎨 رنگی کیفیت بالا", "🟡 رنگی کیفیت پایین"],
+            ["⬛ سیاه سفید"],
+            ["🔙 بازگشت"]
+        ],
+        resize_keyboard=True
+    )
     context.user_data['selected_product'] = pid
     await update.message.reply_text(f"({price_info})\nلطفا نوع چاپ را انتخاب کنید:", reply_markup=kb)
     return S_BUY_SELECT_TYPE
@@ -593,24 +610,34 @@ async def buy_select_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     uid = update.effective_user.id
     key = str(uid)
+
     if text == "🔙 بازگشت":
         await update.message.reply_text("بازگشت", reply_markup=user_main_keyboard(True))
         return S_MAIN
+
     pid = context.user_data.get('selected_product')
     if not pid:
         await update.message.reply_text("ابتدا جزوه را انتخاب کنید.")
         return S_MAIN
+
     p = products.get(pid, {})
-    # robust matching: check if 'رنگ' in text or 'سیاه' in text
-    if "رنگ" in text:
-        context.user_data['buy_type'] = 'رنگی'
-        context.user_data['unit_price'] = int(p.get('color_price', 0) or 0)
+
+    if "کیفیت بالا" in text:
+        context.user_data['buy_type'] = 'رنگی کیفیت بالا'
+        context.user_data['unit_price'] = int(p.get('color_high_price', 0) or 0)
+
+    elif "کیفیت پایین" in text:
+        context.user_data['buy_type'] = 'رنگی کیفیت پایین'
+        context.user_data['unit_price'] = int(p.get('color_low_price', 0) or 0)
+
     elif "سیاه" in text:
         context.user_data['buy_type'] = 'سیاه و سفید'
         context.user_data['unit_price'] = int(p.get('bw_price', 0) or 0)
+
     else:
-        await update.message.reply_text("لطفا رنگی یا سیاه‌وسفید را انتخاب کنید.")
+        await update.message.reply_text("لطفا یکی از گزینه‌ها را انتخاب کنید.")
         return S_BUY_SELECT_TYPE
+
     await update.message.reply_text("لطفا تعداد را وارد کنید (عدد صحیح):", reply_markup=back_kb())
     return S_BUY_ENTER_QTY
 
@@ -763,10 +790,19 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Also, if admin previously chose inspect_product, handle color selection
     inspect = context.user_data.get('inspect_product')
-    if inspect and text in ("🎨 رنگی", "⬛ سیاه سفید", "رنگی", "سیاه و سفید"):
+    if inspect and (
+        "کیفیت بالا" in text or
+        "کیفیت پایین" in text or
+        "سیاه" in text
+    ):
         pid = inspect.get('pid')
         source = inspect.get('source')
-        typ = 'رنگی' if "رنگ" in text else 'سیاه و سفید'
+        if "کیفیت بالا" in text:
+            typ = "رنگی کیفیت بالا"
+        elif "کیفیت پایین" in text:
+            typ = "رنگی کیفیت پایین"
+        else:
+            typ = "سیاه و سفید"
 
         user_qty = {}
 
@@ -793,12 +829,6 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"{name} — {qty} عدد")
         await update.message.reply_text("\n".join(lines), reply_markup=admin_main_keyboard())
         return S_MAIN
-        lines = []
-        for uid_k, qty in user_qty.items():
-            name = make_disp_name(users.get(str(uid_k), {}))
-            lines.append(f"{name} — {qty} عدد")
-        await update.message.reply_text("\n".join(lines), reply_markup=admin_main_keyboard())
-        return S_MAIN
 
     # Admin main menu options
     if text == "🔙 بازگشت":
@@ -815,7 +845,12 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return S_MAIN
         lines = []
         for p in products.values():
-            lines.append(f"📘 {p['title']}\n🎨 رنگی: {p.get('color_price','-')} تومان — ⬛ سیاه و سفید: {p.get('bw_price','-')} تومان\n")
+            lines.append(
+                f"📘 {p['title']}\n"
+                f"🎨 بالا: {p.get('color_high_price','-')} — "
+                f"🟡 پایین: {p.get('color_low_price','-')} — "
+                f"⬛ سیاه: {p.get('bw_price','-')}\n"
+            )
         kb = [[p['title']] for p in products.values()]
         kb.append(["🗑 حذف جزوه"])
         kb.append(["🔙 بازگشت"])
@@ -865,7 +900,11 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     title = it['title']
                     typ = it['type']
                     if title not in agg:
-                        agg[title] = {"رنگی": 0, "سیاه و سفید": 0}
+                        agg[title] = {
+                            "رنگی کیفیت بالا": 0,
+                            "رنگی کیفیت پایین": 0,
+                            "سیاه و سفید": 0
+                        }
                     agg[title][typ] = agg[title].get(typ, 0) + it.get('qty', 0)
         if not agg:
             await update.message.reply_text("فعلا جزوه خریداری شده‌ای وجود ندارد.", reply_markup=admin_main_keyboard())
@@ -874,7 +913,13 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb.append(["🔙 بازگشت"])
         context.user_data['purchased_agg'] = agg
         context.user_data.pop('finalized_agg', None)
-        lines = [f"{t} : رنگی {v['رنگی']} - سیاه و سفید {v['سیاه و سفید']}" for t,v in agg.items()]
+        lines = [
+            f"{t} : "
+            f"بالا {v['رنگی کیفیت بالا']} - "
+            f"پایین {v['رنگی کیفیت پایین']} - "
+            f"سیاه {v['سیاه و سفید']}"
+            for t, v in agg.items()
+        ]
         await update.message.reply_text("\n".join(lines), reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
         return S_MAIN
 
@@ -886,7 +931,11 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     title = it['title']
                     typ = it['type']
                     if title not in agg:
-                        agg[title] = {"رنگی": 0, "سیاه و سفید": 0}
+                        agg[title] = {
+                            "رنگی کیفیت بالا": 0,
+                            "رنگی کیفیت پایین": 0,
+                            "سیاه و سفید": 0
+                        }
                     agg[title][typ] = agg[title].get(typ, 0) + it.get('qty', 0)
         if not agg:
             await update.message.reply_text("فعلا جزوه‌ای در حالت ثبت نهایی وجود ندارد.", reply_markup=admin_main_keyboard())
@@ -895,17 +944,23 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb.append(["🔙 بازگشت"])
         context.user_data['finalized_agg'] = agg
         context.user_data.pop('purchased_agg', None)
-        lines = [f"{t} : رنگی {v['رنگی']} - سیاه و سفید {v['سیاه و سفید']}" for t,v in agg.items()]
+        lines = [
+            f"{t} : "
+            f"بالا {v['رنگی کیفیت بالا']} - "
+            f"پایین {v['رنگی کیفیت پایین']} - "
+            f"سیاه {v['سیاه و سفید']}"
+            for t, v in agg.items()
+        ]
         await update.message.reply_text("\n".join(lines), reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
         return S_MAIN
 
     if text == "🕓 فیش‌های در انتظار تایید":
-        if not pending_payments:
-            await update.message.reply_text("فعلا فیشی در انتظار تایید نیست.", reply_markup=admin_main_keyboard())
-            return S_MAIN
-
-    # ✅ ارسال برای تمام ادمین‌ها (اصلی + فرعی)
-        all_admins = [ADMIN_ID] + admins
+        if text == "🕓 فیش‌های در انتظار تایید":
+            if not pending_payments:
+                await update.message.reply_text("فعلا فیشی در انتظار تایید نیست.", reply_markup=admin_main_keyboard())
+                return S_MAIN
+        
+            all_admins = [ADMIN_ID] + admins
 
         for pay_id, pay in pending_payments.items():
             if pay.get("status") != "pending":
@@ -983,7 +1038,14 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("جزوه یافت نشد.", reply_markup=admin_main_keyboard())
             return S_MAIN
         context.user_data['inspect_product'] = {'pid': pid, 'source': 'purchased'}
-        kb = ReplyKeyboardMarkup([[f"🎨 رنگی", f"⬛ سیاه سفید"], ["🔙 بازگشت"]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(
+            [
+                ["🎨 رنگی کیفیت بالا", "🟡 رنگی کیفیت پایین"],
+                ["⬛ سیاه سفید"],
+                ["🔙 بازگشت"]
+            ],
+            resize_keyboard=True
+        )
         await update.message.reply_text("نوع را انتخاب کنید:", reply_markup=kb)
         return S_MAIN
 
@@ -993,7 +1055,14 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("جزوه یافت نشد.", reply_markup=admin_main_keyboard())
             return S_MAIN
         context.user_data['inspect_product'] = {'pid': pid, 'source': 'finalized'}
-        kb = ReplyKeyboardMarkup([[f"🎨 رنگی", f"⬛ سیاه سفید"], ["🔙 بازگشت"]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(
+            [
+                ["🎨 رنگی کیفیت بالا", "🟡 رنگی کیفیت پایین"],
+                ["⬛ سیاه سفید"],
+                ["🔙 بازگشت"]
+            ],
+            resize_keyboard=True
+        )
         await update.message.reply_text("نوع را انتخاب کنید:", reply_markup=kb)
         return S_MAIN
 
@@ -1140,7 +1209,7 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚙️ بخش مدیریت ادمین‌ها:",
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True),
         )
-        return "S_MANAGE_ADMINS"
+        return S_MANAGE_ADMINS
     # --- 🔼 پایان کد جدید ---
 
 
@@ -1158,9 +1227,23 @@ async def admin_add_product_name(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("بازگشت", reply_markup=admin_main_keyboard())
         return S_MAIN
     pid = next_product_id()
-    products[pid] = {"title": text, "color_price": 0, "bw_price": 0}
+    products[pid] = {
+        "title": text,
+        "color_high_price": 0,
+        "color_low_price": 0,
+        "bw_price": 0
+    }
     context.user_data['new_product_id'] = pid
-    kb = ReplyKeyboardMarkup([["🎨 رنگی", "⬛ سیاه سفید"], ["✅ ثبت جزوه"], ["🔙 بازگشت"]], resize_keyboard=True)
+    kb = ReplyKeyboardMarkup(
+        [
+            ["🎨 قیمت رنگی کیفیت بالا"],
+            ["🟡 قیمت رنگی کیفیت پایین"],
+            ["⬛ قیمت سیاه سفید"],
+            ["✅ ثبت جزوه"],
+            ["🔙 بازگشت"]
+        ],
+        resize_keyboard=True
+    )
     await update.message.reply_text("برای اضافه کردن قیمت، یکی از گزینه‌ها را انتخاب کنید یا ثبت جزوه را بزنید:", reply_markup=kb)
     persist_all()
     return S_ADMIN_ADD_CHOOSE
@@ -1171,11 +1254,19 @@ async def admin_add_product_choice(update: Update, context: ContextTypes.DEFAULT
     if not pid:
         await update.message.reply_text("ابتدا نام جزوه را وارد کنید.")
         return S_MAIN
-    if text == "🎨 رنگی":
-        await update.message.reply_text("قیمت رنگی را وارد کنید (عدد):", reply_markup=back_kb())
+    if "کیفیت بالا" in text:
+        context.user_data['price_field'] = 'color_high_price'
+        await update.message.reply_text("قیمت رنگی کیفیت بالا را وارد کنید:")
         return S_ADMIN_ADD_COLOR_PRICE
-    if text == "⬛ سیاه سفید":
-        await update.message.reply_text("قیمت سیاه سفید را وارد کنید (عدد):", reply_markup=back_kb())
+    
+    elif "کیفیت پایین" in text:
+        context.user_data['price_field'] = 'color_low_price'
+        await update.message.reply_text("قیمت رنگی کیفیت پایین را وارد کنید:")
+        return S_ADMIN_ADD_COLOR_PRICE
+    
+    elif "سیاه" in text:
+        context.user_data['price_field'] = 'bw_price'
+        await update.message.reply_text("قیمت سیاه سفید را وارد کنید:")
         return S_ADMIN_ADD_BW_PRICE
     if text == "✅ ثبت جزوه":
         prod = products.get(pid)
@@ -1193,18 +1284,37 @@ async def admin_add_product_choice(update: Update, context: ContextTypes.DEFAULT
 
 async def admin_add_color_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
+
     if text == "🔙 بازگشت":
         await update.message.reply_text("بازگشت", reply_markup=admin_main_keyboard())
         return S_MAIN
+
     pid = context.user_data.get('new_product_id')
+    field = context.user_data.get('price_field')
+
     try:
         val = int(text)
-    except Exception:
+    except:
         await update.message.reply_text("لطفا عدد صحیح وارد کنید.")
         return S_ADMIN_ADD_COLOR_PRICE
-    products[pid]['color_price'] = val
+
+    products[pid][field] = val
     persist_all()
-    await update.message.reply_text("قیمت رنگی ثبت شد.", reply_markup=ReplyKeyboardMarkup([["⬛ سیاه سفید"], ["✅ ثبت جزوه"], ["🔙 بازگشت"]], resize_keyboard=True))
+
+    await update.message.reply_text(
+        "قیمت ثبت شد.",
+        reply_markup=ReplyKeyboardMarkup(
+            [
+                ["🎨 قیمت رنگی کیفیت بالا"],
+                ["🟡 قیمت رنگی کیفیت پایین"],
+                ["⬛ قیمت سیاه سفید"],
+                ["✅ ثبت جزوه"],
+                ["🔙 بازگشت"]
+            ],
+            resize_keyboard=True
+        )
+    )
+
     return S_ADMIN_ADD_CHOOSE
 
 async def admin_add_bw_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1220,8 +1330,19 @@ async def admin_add_bw_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return S_ADMIN_ADD_BW_PRICE
     products[pid]['bw_price'] = val
     persist_all()
-    await update.message.reply_text("قیمت سیاه و سفید ثبت شد.", reply_markup=ReplyKeyboardMarkup([["🎨 رنگی"], ["✅ ثبت جزوه"], ["🔙 بازگشت"]], resize_keyboard=True))
-    return S_ADMIN_ADD_CHOOSE
+    await update.message.reply_text(
+        "قیمت سیاه و سفید ثبت شد.",
+        reply_markup=ReplyKeyboardMarkup(
+            [
+                ["🎨 قیمت رنگی کیفیت بالا"],
+                ["🟡 قیمت رنگی کیفیت پایین"],
+                ["⬛ قیمت سیاه سفید"],
+                ["✅ ثبت جزوه"],
+                ["🔙 بازگشت"]
+            ],
+            resize_keyboard=True
+        )
+    )    return S_ADMIN_ADD_CHOOSE
 
 # Admin list and delete product
 async def admin_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1240,19 +1361,36 @@ async def admin_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     pid, p = find_product_by_title(text)
     if pid:
-        total_color = 0
+        total_high = 0
+        total_low = 0
         total_bw = 0
         detail_lines = []
+        
         for uid_k, user_orders in orders.items():
             for ord_entry in user_orders:
                 for it in ord_entry.get('items', []):
                     if it.get('product_id') == pid:
-                        if it.get('type') in ('رنگی', 'color', 'Color'):
-                            total_color += it.get('qty', 0)
+                        typ = it.get('type')
+                        qty = it.get('qty', 0)
+        
+                        if typ == "رنگی کیفیت بالا":
+                            total_high += qty
+                        elif typ == "رنگی کیفیت پایین":
+                            total_low += qty
                         else:
-                            total_bw += it.get('qty', 0)
-                        detail_lines.append(f"{ord_entry.get('first_name','')} {ord_entry.get('last_name','')} — {it.get('qty')} — {it.get('type')}")
-        lines = [f"جزوه: {p.get('title')}", f"تعداد رنگی نهایی شده: {total_color}", f"تعداد سیاه و سفید نهایی شده: {total_bw}"]
+                            total_bw += qty
+        
+                        detail_lines.append(
+                            f"{ord_entry.get('first_name','')} "
+                            f"{ord_entry.get('last_name','')} — "
+                            f"{qty} — {typ}"
+                        )
+        lines = [
+            f"جزوه: {p.get('title')}",
+            f"🎨 رنگی کیفیت بالا: {total_high}",
+            f"🟡 رنگی کیفیت پایین: {total_low}",
+            f"⬛ سیاه و سفید: {total_bw}"
+        ]
         if detail_lines:
             lines.append("\nجزئیات:")
             lines.extend(detail_lines)
@@ -1558,12 +1696,12 @@ async def handle_manage_admins(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if text == "➕ اضافه کردن ادمین جدید":
         await update.message.reply_text("لطفاً آیدی عددی کاربر را بفرستید:", reply_markup=back_kb())
-        return "S_ADD_ADMIN"
+        return S_ADD_ADMIN
 
     if text == "➖ حذف ادمین‌های موجود":
         if not admins:
             await update.message.reply_text("هیچ ادمینی وجود ندارد.", reply_markup=back_kb())
-            return "S_MANAGE_ADMINS"
+            return S_MANAGE_ADMINS
 
         kb = [[KeyboardButton(str(a))] for a in admins]
         kb.append([KeyboardButton("🔙 بازگشت")])
@@ -1571,7 +1709,7 @@ async def handle_manage_admins(update: Update, context: ContextTypes.DEFAULT_TYP
             "ادمین مورد نظر برای حذف را انتخاب کنید:",
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True),
         )
-        return "S_REMOVE_ADMIN"
+        return S_REMOVE_ADMIN
 
 
 async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1584,7 +1722,7 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_admin = int(text)
     except ValueError:
         await update.message.reply_text("❌ آیدی نامعتبر است.", reply_markup=back_kb())
-        return "S_ADD_ADMIN"
+        return S_ADD_ADMIN
 
     if new_admin in admins:
         await update.message.reply_text("⚠️ این کاربر از قبل ادمین است.", reply_markup=admin_main_keyboard())
@@ -1609,7 +1747,7 @@ async def handle_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
         admin_id = int(text)
     except ValueError:
         await update.message.reply_text("❌ مقدار وارد شده معتبر نیست.", reply_markup=back_kb())
-        return "S_REMOVE_ADMIN"
+        return S_REMOVE_ADMIN
 
     if admin_id not in admins:
         await update.message.reply_text("⚠️ چنین ادمینی وجود ندارد.", reply_markup=admin_main_keyboard())
@@ -1673,9 +1811,9 @@ def setup_handlers_for_web(application):
             S_ADMIN_UNBLOCK_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_unblock_id)],
 
             # --- 🔽 Stateهای جدید برای مدیریت ادمین‌ها ---
-            "S_MANAGE_ADMINS": [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manage_admins)],
-            "S_ADD_ADMIN": [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_admin)],
-            "S_REMOVE_ADMIN": [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_remove_admin)],
+            S_MANAGE_ADMINS: [MessageHandler(..., handle_manage_admins)],
+            S_ADD_ADMIN: [MessageHandler(..., handle_add_admin)],
+            S_REMOVE_ADMIN: [MessageHandler(..., handle_remove_admin)],
             # --- 🔼 پایان stateهای جدید ---
         },
         fallbacks=[MessageHandler(filters.COMMAND, ignore_command)],
