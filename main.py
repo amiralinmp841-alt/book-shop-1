@@ -74,43 +74,6 @@ logger = logging.getLogger(__name__)
 ) = range(16)
 
 # ---------------- STORAGE HELPERS ----------------
-import os
-import io
-import zipfile
-
-FILES_TO_BACKUP = [
-    USERS_FILE,
-    PRODUCTS_FILE,
-    ORDERS_FILE,
-    PENDING_PAYMENTS_FILE,
-    PURCHASES_FILE,
-    BLOCKED_FILE
-]
-
-async def send_backup_now():
-    backup_group_id = os.getenv("BACKUP_GROUP_ID")
-    if not backup_group_id:
-        return
-
-    buf = io.BytesIO()
-
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
-        for f in FILES_TO_BACKUP:
-            if f.exists():
-                z.write(f, arcname=f.name)
-
-    buf.seek(0)
-
-    try:
-        await application.bot.send_document(
-            chat_id=int(backup_group_id),
-            document=buf,
-            filename="auto_backup.zip",
-            caption="📦 بکاپ فوری بعد از تغییر فایل"
-        )
-    except Exception as e:
-        logger.warning(f"Backup failed: {e}")
-
 def load_json(path: Path, default):
     if path.exists():
         try:
@@ -120,16 +83,32 @@ def load_json(path: Path, default):
     return default
 
 def save_json(path: Path, data):
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 🔥 بعد از هر ذخیره → بکاپ فوری
-    try:
-        asyncio.get_running_loop().create_task(send_backup_now())
-    except RuntimeError:
-        pass  # اگر داخل loop نبود، رد کن
+# --- 🔽 کد جدید برای ذخیره‌سازی ادمین‌ها ---
+ADMINS_FILE = DATA_DIR / "admins.json"
+admins = load_json(ADMINS_FILE, [])
+# --- 🔼 پایان کد جدید ---
+
+
+users: Dict[str, dict] = load_json(USERS_FILE, {})
+products: Dict[str, dict] = load_json(PRODUCTS_FILE, {})
+orders: Dict[str, list] = load_json(ORDERS_FILE, {})  # orders per user (finalized, unpaid)
+pending_payments: Dict[str, dict] = load_json(PENDING_PAYMENTS_FILE, {})
+purchases: Dict[str, list] = load_json(PURCHASES_FILE, {})
+blocked: List[int] = load_json(BLOCKED_FILE, [])
+
+def persist_all():
+    save_json(USERS_FILE, users)
+    save_json(PRODUCTS_FILE, products)
+    save_json(ORDERS_FILE, orders)
+    save_json(PENDING_PAYMENTS_FILE, pending_payments)
+    save_json(PURCHASES_FILE, purchases)
+    save_json(BLOCKED_FILE, blocked)
+    # --- 🔽 ذخیره ادمین‌ها ---
+    save_json(ADMINS_FILE, admins)
+    # --- 🔼 پایان تغییر ---
+
 
 # --- 🔽 کد جدید برای ذخیره‌سازی ادمین‌ها ---
 ADMINS_FILE = DATA_DIR / "admins.json"
@@ -287,7 +266,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-0-0 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -1729,59 +1708,27 @@ application = setup_handlers_for_web(application)
 
 # FastAPI lifecycle events
 
-import os
-import zipfile
-import io
 import asyncio
 
 async def auto_backup():
     while True:
+        import zipfile, io
         buf = io.BytesIO()
-
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
-            for f in [
-                USERS_FILE,
-                PRODUCTS_FILE,
-                ORDERS_FILE,
-                PENDING_PAYMENTS_FILE,
-                PURCHASES_FILE,
-                BLOCKED_FILE
-            ]:
+            for f in [USERS_FILE, PRODUCTS_FILE, ORDERS_FILE, PENDING_PAYMENTS_FILE, PURCHASES_FILE, BLOCKED_FILE]:
                 if f.exists():
                     z.write(f, arcname=f.name)
-
         buf.seek(0)
-
-        backup_group_id = os.getenv("BACKUP_GROUP_ID")
-        sent = False
-
-        # ✅ تلاش برای ارسال به گروه بکاپ
-        if backup_group_id:
-            try:
-                await application.bot.send_document(
-                    chat_id=int(backup_group_id),
-                    document=buf,
-                    filename="auto_backup.zip",
-                    caption="📦 بکاپ خودکار هر 1 دقیقه",
-                )
-                sent = True
-            except Exception as e:
-                logger.warning(f"ارسال بکاپ به گروه ناموفق بود: {e}")
-
-        # ✅ fallback اگر ENV ست نبود یا ارسال شکست خورد
-        if not sent:
-            try:
-                buf.seek(0)  # مهم! چون قبلاً مصرف شده
-                await application.bot.send_document(
-                    chat_id=ADMIN_ID,
-                    document=buf,
-                    filename="auto_backup.zip",
-                    caption="📦 بکاپ خودکار هر 1 دقیقه (Fallback)",
-                )
-            except Exception as e:
-                logger.warning(f"Auto backup failed completely: {e}")
-
-        await asyncio.sleep(60)  # هر 1 دقیقه
+        try:
+            await application.bot.send_document(
+                chat_id=ADMIN_ID,
+                document=buf,
+                filename="auto_backup.zip",
+                caption="📦 بکاپ خودکار هر 1 دقیقه",
+            )
+        except Exception as e:
+            logger.warning(f"Auto backup failed: {e}")
+        await asyncio.sleep(60)  # ۱ دقیقه
 
 
 @fastapi_app.on_event("startup")
