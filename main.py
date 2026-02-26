@@ -186,7 +186,7 @@ def admin_main_keyboard():
 
     kb.append([KeyboardButton("🔙 بازگشت")])
          # --- 🔽 دکمه جدید برای مدیریت ادمین‌ها ---
-    kb.append([KeyboardButton("⚙️ مدیریت ادمین‌ها")])
+    #kb.append([KeyboardButton("⚙️ مدیریت ادمین‌ها")])
     # --- 🔼 پایان کد جدید ---
 
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
@@ -262,7 +262,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-0-9 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-1-1 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -498,7 +498,7 @@ async def register_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users[key]['first_name'] = first
     users[key]['last_name'] = last
     persist_all()
-    await update.message.reply_text("شما خوابگاهی هستید یا تهرانی؟", reply_markup=ReplyKeyboardMarkup([["تهرانی", "خوابگاهی"], ["🔙 بازگشت"]], resize_keyboard=True))
+    await update.message.reply_text("شما خوابگاهی هستید یا تهرانی؟(مهم نیست، الکی یچی بزنید!)", reply_markup=ReplyKeyboardMarkup([["تهرانی", "خوابگاهی"], ["🔙 بازگشت"]], resize_keyboard=True))
     return S_REGISTER_DORM
 
 async def register_dorm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -875,20 +875,38 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return S_MAIN
 
     if text == "👤 اسامی خریداران":
+    
         names = []
         for uid_k, p_list in purchases.items():
             if p_list:
                 u = users.get(uid_k, {})
                 names.append((uid_k, make_disp_name(u)))
+    
         if not names:
-            await update.message.reply_text("فعلا خریدار تایید شده‌ای وجود ندارد.", reply_markup=admin_main_keyboard())
+            await update.message.reply_text(
+                "فعلا خریدار تایید شده‌ای وجود ندارد.",
+                reply_markup=admin_main_keyboard()
+            )
             return S_MAIN
+    
         kb = [["🗑 حذف لیست"]]
+    
+        # نمایش خریداران به صورت دکمه
         kb += [[f"{n[1]} — id:{n[0]}"] for n in names]
+    
         kb.append(["🔙 بازگشت"])
-        await update.message.reply_text("اسامی خریداران تاییدشده:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
-        context.user_data['buyers_map'] = {f"{n[1]} — id:{n[0]}": n[0] for n in names}
-        context.user_data.pop('reg_names_map', None)
+    
+        await update.message.reply_text(
+            "اسامی خریداران تاییدشده:\n\n"
+            "👆 روی هر خریدار بزنید تا جزوات خریداری شده او نمایش داده شود.",
+            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+        )
+    
+        # ذخیره mapping برای انتخاب بعدی
+        context.user_data['buyers_map'] = {
+            f"{n[1]} — id:{n[0]}": n[0] for n in names
+        }
+    
         return S_MAIN
 
     if text == "📚 جزوات خریداری شده":
@@ -1085,30 +1103,112 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return S_MAIN
 
     # clicked on buyer
+    # clicked on buyer
     if 'buyers_map' in context.user_data and text in context.user_data['buyers_map']:
+    
         the_uid = context.user_data['buyers_map'][text]
-        pur_list = purchases.get(str(the_uid), [])
-        if not pur_list:
-            await update.message.reply_text("این کاربر خرید تاییدشده‌ای ندارد.", reply_markup=admin_main_keyboard())
-            return S_MAIN
-        lines = []
-        total_sum = 0
-        for i, pch in enumerate(pur_list,1):
-            items_lines = "\n".join([f"- {it['title']} ({it['type']}) x {it['qty']}" for it in pch.get('items', [])])
-            lines.append(f"خرید {i} — جمع: {pch.get('total')} تومان\n{items_lines}")
-            total_sum += pch.get('total', 0)
         context.user_data['selected_buyer'] = the_uid
-        kb = [
-            [KeyboardButton("🗑 حذف همه خریدهای کاربر")],
-            [KeyboardButton("💬 چت با کاربر")],
-            [KeyboardButton("🔙 بازگشت")]
-        ]
+    
+        pur_list = purchases.get(str(the_uid), [])
+    
+        if not pur_list:
+            await update.message.reply_text(
+                "این کاربر خرید تاییدشده‌ای ندارد.",
+                reply_markup=admin_main_keyboard()
+            )
+            return S_MAIN
+    
+        lines = []
+        kb = []
+    
+        total_sum = 0
+    
+        # نمایش خریدها + ساخت دکمه حذف هر آیتم
+        for pur in pur_list:
+            for it in pur.get('items', []):
+    
+                lines.append(
+                    f"- {it['title']} ({it['type']}) x {it['qty']}"
+                )
+    
+                kb.append([
+                    KeyboardButton(
+                        f"🗑 حذف {it['title']} | {it['type']}"
+                    )
+                ])
+    
+                total_sum += it['qty'] * it['unit_price']
+    
+        kb.append([KeyboardButton("🗑 حذف همه خریدهای کاربر")])
+        kb.append([KeyboardButton("💬 چت با کاربر")])
+        kb.append([KeyboardButton("🔙 بازگشت")])
+    
         await update.message.reply_text(
             f"خریدهای {make_disp_name(users.get(str(the_uid), {}))}:\n\n" +
-            "\n\n".join(lines) +
+            "\n".join(lines) +
             f"\n\nجمع کل: {total_sum}",
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
         )
+    
+        return S_MAIN
+
+
+    if text.startswith("🗑 حذف "):
+    
+        buyer_uid = context.user_data.get('selected_buyer')
+        if not buyer_uid:
+            return S_MAIN
+    
+        parts = text.replace("🗑 حذف ", "").split("|")
+    
+        title = parts[0].strip()
+        typ = parts[1].strip() if len(parts) > 1 else ""
+    
+        # حذف از purchases
+        for uid_k in list(purchases.keys()):
+            for pur in purchases[uid_k]:
+                pur['items'] = [
+                    it for it in pur.get('items', [])
+                    if not (it['title'] == title and it['type'] == typ)
+                ]
+    
+            # حذف خریدهای خالی
+            purchases[uid_k] = [
+                pur for pur in purchases[uid_k]
+                if pur.get('items')
+            ]
+    
+            if not purchases[uid_k]:
+                purchases.pop(uid_k, None)
+    
+        # حذف از orders
+        for uid_k in list(orders.keys()):
+            for ord_entry in orders[uid_k]:
+                ord_entry['items'] = [
+                    it for it in ord_entry.get('items', [])
+                    if not (it['title'] == title and it['type'] == typ)
+                ]
+    
+                ord_entry['total'] = sum(
+                    it['qty'] * it['unit_price']
+                    for it in ord_entry['items']
+                )
+    
+            orders[uid_k] = [
+                o for o in orders[uid_k]
+                if o.get('items')
+            ]
+    
+            if not orders[uid_k]:
+                orders.pop(uid_k, None)
+    
+        persist_all()
+    
+        await update.message.reply_text(
+            "آیتم حذف شد ✅",
+            reply_markup=admin_main_keyboard()
+        )
+    
         return S_MAIN
 
     # Handle admin "💬 چت با کاربر" from selected context
