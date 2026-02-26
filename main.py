@@ -262,7 +262,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-1-4 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-1-5 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -1164,6 +1164,59 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
         return S_MAIN
     
+
+    if text.startswith("➖ کم کردن آیتم"):
+    
+        try:
+            idx = int(text.replace("➖ کم کردن آیتم", "").strip())
+        except:
+            return S_MAIN
+    
+        items_map = context.user_data.get("buyer_items_map", [])
+    
+        if idx >= len(items_map):
+            return S_MAIN
+    
+        item = items_map[idx]
+    
+        buyer_uid = context.user_data.get("selected_buyer")
+    
+        # ⭐ فقط 1 عدد کم کن
+        for uid_k in list(purchases.keys()):
+    
+            for pur in purchases[uid_k]:
+    
+                for it in pur.get("items", []):
+    
+                    if (
+                        it["title"] == item["title"] and
+                        it["type"] == item["type"]
+                    ):
+    
+                        it["qty"] -= 1
+    
+                        # اگر صفر شد → حذف کامل
+                        if it["qty"] <= 0:
+                            pur["items"].remove(it)
+    
+                        break
+    
+            # پاکسازی سفارش‌های خالی
+            purchases[uid_k] = [
+                p for p in purchases[uid_k]
+                if p.get("items")
+            ]
+    
+            if not purchases[uid_k]:
+                purchases.pop(uid_k, None)
+    
+        persist_all()
+    
+        # ⭐ دوباره همان صفحه را نشان بده
+        if buyer_uid:
+            await show_buyer_purchase_panel(update, context, buyer_uid)
+    
+        return S_MAIN
     
     # Handle admin "💬 چت با کاربر" from selected context
     if text == "💬 چت با کاربر":
@@ -1279,60 +1332,7 @@ async def show_buyer_purchase_panel(update, context, buyer_uid):
 
     if not pur_list:
         await update.message.reply_text(
-            "این کاربر خرید تاییدشده‌ای ندارد.",
-            reply_markup=admin_main_keyboard()
-        )
-        return
-
-    lines = []
-    kb = []
-
-    total_sum = 0
-
-    # ساخت map آیتم‌ها برای حذف دقیق
-    items_map = []
-
-    for pur in pur_list:
-        for it in pur.get('items', []):
-
-            lines.append(
-                f"- {it['title']} ({it['type']}) x {it['qty']}"
-            )
-
-            items_map.append({
-                "buyer_uid": buyer_uid,
-                "title": it["title"],
-                "type": it["type"]
-            })
-
-            idx = len(items_map) - 1
-
-            kb.append([
-                KeyboardButton(f"🗑 حذف آیتم {idx}")
-            ])
-
-            total_sum += it['qty'] * it['unit_price']
-
-    context.user_data["buyer_items_map"] = items_map
-
-    kb.append([KeyboardButton("🗑 حذف همه خریدهای کاربر")])
-    kb.append([KeyboardButton("💬 چت با کاربر")])
-    kb.append([KeyboardButton("🔙 بازگشت")])
-
-    await update.message.reply_text(
-        f"خریدهای {make_disp_name(users.get(str(buyer_uid), {}))}:\n\n"
-        + "\n".join(lines)
-        + f"\n\nجمع کل: {total_sum}",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    )
-
-async def show_buyer_purchase_panel(update, context, buyer_uid):
-
-    pur_list = purchases.get(str(buyer_uid), [])
-
-    if not pur_list:
-        await update.message.reply_text(
-            "این کاربر خرید تاییدشده‌ای ندارد.",
+            "این کاربر خریدی ندارد.",
             reply_markup=admin_main_keyboard()
         )
         return
@@ -1343,11 +1343,10 @@ async def show_buyer_purchase_panel(update, context, buyer_uid):
 
     total_sum = 0
 
-    # ⭐ آیتم‌ها را با ID جداگانه نمایش بده
     for pur in pur_list:
         for it in pur.get("items", []):
 
-            # اگر item_id ندارد → بساز
+            # اگر id ندارد بساز
             if "item_id" not in it:
                 it["item_id"] = str(uuid.uuid4())
 
@@ -1359,8 +1358,9 @@ async def show_buyer_purchase_panel(update, context, buyer_uid):
                 f"{idx}. {it['title']} {it['type']} x {it['qty']}"
             )
 
+            # ⭐ دکمه کاهش 1 عدد
             kb.append([
-                KeyboardButton(f"🗑 حذف آیتم {idx}")
+                KeyboardButton(f"➖ کم کردن آیتم {idx}")
             ])
 
             total_sum += it["qty"] * it["unit_price"]
