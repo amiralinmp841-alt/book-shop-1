@@ -96,6 +96,38 @@ logger = logging.getLogger(__name__)
 ) = range(16)
 
 # ---------------- STORAGE HELPERS ----------------
+import os
+import io
+import zipfile
+
+FILES_TO_BACKUP = [
+    USERS_FILE,
+    PRODUCTS_FILE,
+    ORDERS_FILE,
+    PENDING_PAYMENTS_FILE,
+    PURCHASES_FILE,
+    BLOCKED_FILE
+]
+async def send_backup_now():
+    backup_group_id = os.getenv("BACKUP_GROUP_ID")
+    if not backup_group_id:
+        return
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for f in FILES_TO_BACKUP:
+            if f.exists():
+                z.write(f, arcname=f.name)
+    buf.seek(0)
+    try:
+        await application.bot.send_document(
+            chat_id=int(backup_group_id),
+            document=buf,
+            filename="auto_backup.zip",
+            caption="📦 بکاپ فوری بعد از تغییر فایل"
+        )
+    except Exception as e:
+        logger.warning(f"Backup failed: {e}")
+
 def load_json(path: Path, default):
     if path.exists():
         try:
@@ -105,7 +137,15 @@ def load_json(path: Path, default):
     return default
 
 def save_json(path: Path, data):
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    # 🔥 بعد از هر ذخیره → بکاپ فوری
+    try:
+        asyncio.get_running_loop().create_task(send_backup_now())
+    except RuntimeError:
+        pass  # اگر داخل loop نبود، رد کن
 
 # --- 🔽 کد جدید برای ذخیره‌سازی ادمین‌ها ---
 ADMINS_FILE = DATA_DIR / "admins.json"
