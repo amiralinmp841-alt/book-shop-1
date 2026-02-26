@@ -262,7 +262,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-1-1 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-1-2 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -1104,113 +1104,64 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # clicked on buyer
     # clicked on buyer
+# clicked on buyer
     if 'buyers_map' in context.user_data and text in context.user_data['buyers_map']:
     
         the_uid = context.user_data['buyers_map'][text]
         context.user_data['selected_buyer'] = the_uid
     
-        pur_list = purchases.get(str(the_uid), [])
-    
-        if not pur_list:
-            await update.message.reply_text(
-                "این کاربر خرید تاییدشده‌ای ندارد.",
-                reply_markup=admin_main_keyboard()
-            )
-            return S_MAIN
-    
-        lines = []
-        kb = []
-    
-        total_sum = 0
-    
-        # نمایش خریدها + ساخت دکمه حذف هر آیتم
-        for pur in pur_list:
-            for it in pur.get('items', []):
-    
-                lines.append(
-                    f"- {it['title']} ({it['type']}) x {it['qty']}"
-                )
-    
-                kb.append([
-                    KeyboardButton(
-                        f"🗑 حذف {it['title']} | {it['type']}"
-                    )
-                ])
-    
-                total_sum += it['qty'] * it['unit_price']
-    
-        kb.append([KeyboardButton("🗑 حذف همه خریدهای کاربر")])
-        kb.append([KeyboardButton("💬 چت با کاربر")])
-        kb.append([KeyboardButton("🔙 بازگشت")])
-    
-        await update.message.reply_text(
-            f"خریدهای {make_disp_name(users.get(str(the_uid), {}))}:\n\n" +
-            "\n".join(lines) +
-            f"\n\nجمع کل: {total_sum}",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-        )
+        await show_buyer_purchase_panel(update, context, the_uid)
     
         return S_MAIN
 
 
-    if text.startswith("🗑 حذف "):
+    if text.startswith("🗑 حذف آیتم"):
     
-        buyer_uid = context.user_data.get('selected_buyer')
-        if not buyer_uid:
+        try:
+            idx = int(text.replace("🗑 حذف آیتم", "").strip())
+        except:
             return S_MAIN
     
-        parts = text.replace("🗑 حذف ", "").split("|")
+        items_map = context.user_data.get("buyer_items_map", [])
     
-        title = parts[0].strip()
-        typ = parts[1].strip() if len(parts) > 1 else ""
+        if idx >= len(items_map):
+            return S_MAIN
     
-        # حذف از purchases
+        item_info = items_map[idx]
+    
+        title = item_info["title"]
+        typ = item_info["type"]
+    
+        # حذف فقط یک آیتم
         for uid_k in list(purchases.keys()):
-            for pur in purchases[uid_k]:
-                pur['items'] = [
-                    it for it in pur.get('items', [])
-                    if not (it['title'] == title and it['type'] == typ)
-                ]
     
-            # حذف خریدهای خالی
+            for pur in purchases[uid_k]:
+                for i in range(len(pur["items"]) - 1, -1, -1):
+    
+                    it = pur["items"][i]
+    
+                    if it["title"] == title and it["type"] == typ:
+                        pur["items"].pop(i)
+                        break
+    
             purchases[uid_k] = [
-                pur for pur in purchases[uid_k]
-                if pur.get('items')
+                p for p in purchases[uid_k]
+                if p.get("items")
             ]
     
             if not purchases[uid_k]:
                 purchases.pop(uid_k, None)
     
-        # حذف از orders
-        for uid_k in list(orders.keys()):
-            for ord_entry in orders[uid_k]:
-                ord_entry['items'] = [
-                    it for it in ord_entry.get('items', [])
-                    if not (it['title'] == title and it['type'] == typ)
-                ]
-    
-                ord_entry['total'] = sum(
-                    it['qty'] * it['unit_price']
-                    for it in ord_entry['items']
-                )
-    
-            orders[uid_k] = [
-                o for o in orders[uid_k]
-                if o.get('items')
-            ]
-    
-            if not orders[uid_k]:
-                orders.pop(uid_k, None)
-    
         persist_all()
     
-        await update.message.reply_text(
-            "آیتم حذف شد ✅",
-            reply_markup=admin_main_keyboard()
-        )
+        # ⭐ نمایش مجدد همان پنل
+        buyer_uid = context.user_data.get("selected_buyer")
+        if buyer_uid:
+            await show_buyer_purchase_panel(update, context, buyer_uid)
     
         return S_MAIN
-
+    
+    
     # Handle admin "💬 چت با کاربر" from selected context
     if text == "💬 چت با کاربر":
         the_uid = context.user_data.get('selected_reg_user') or context.user_data.get('selected_buyer')
@@ -1319,6 +1270,102 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("دستور نامعتبر.", reply_markup=admin_main_keyboard())
     return S_MAIN
 
+async def show_buyer_purchase_panel(update, context, buyer_uid):
+
+    pur_list = purchases.get(str(buyer_uid), [])
+
+    if not pur_list:
+        await update.message.reply_text(
+            "این کاربر خرید تاییدشده‌ای ندارد.",
+            reply_markup=admin_main_keyboard()
+        )
+        return
+
+    lines = []
+    kb = []
+
+    total_sum = 0
+
+    # ساخت map آیتم‌ها برای حذف دقیق
+    items_map = []
+
+    for pur in pur_list:
+        for it in pur.get('items', []):
+
+            lines.append(
+                f"- {it['title']} ({it['type']}) x {it['qty']}"
+            )
+
+            items_map.append({
+                "buyer_uid": buyer_uid,
+                "title": it["title"],
+                "type": it["type"]
+            })
+
+            idx = len(items_map) - 1
+
+            kb.append([
+                KeyboardButton(f"🗑 حذف آیتم {idx}")
+            ])
+
+            total_sum += it['qty'] * it['unit_price']
+
+    context.user_data["buyer_items_map"] = items_map
+
+    kb.append([KeyboardButton("🗑 حذف همه خریدهای کاربر")])
+    kb.append([KeyboardButton("💬 چت با کاربر")])
+    kb.append([KeyboardButton("🔙 بازگشت")])
+
+    await update.message.reply_text(
+        f"خریدهای {make_disp_name(users.get(str(buyer_uid), {}))}:\n\n"
+        + "\n".join(lines)
+        + f"\n\nجمع کل: {total_sum}",
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    )
+
+async def admin_show_buyer_panel(update, context, buyer_uid):
+
+    pur_list = purchases.get(str(buyer_uid), [])
+
+    lines = []
+    kb = []
+
+    total_sum = 0
+
+    items_map = []
+
+    for pur in pur_list:
+        for it in pur.get("items", []):
+
+            lines.append(f"- {it['title']} ({it['type']}) x {it['qty']}")
+
+            items_map.append({
+                "buyer_uid": buyer_uid,
+                "title": it["title"],
+                "type": it["type"]
+            })
+
+            idx = len(items_map) - 1
+
+            kb.append([
+                KeyboardButton(f"🗑 حذف آیتم {idx}")
+            ])
+
+            total_sum += it["qty"] * it["unit_price"]
+
+    context.user_data["buyer_items_map"] = items_map
+
+    kb.append([KeyboardButton("🗑 حذف همه خریدهای کاربر")])
+    kb.append([KeyboardButton("💬 چت با کاربر")])
+    kb.append([KeyboardButton("🔙 بازگشت")])
+
+    await update.message.reply_text(
+        "\n".join(lines) +
+        f"\n\nجمع کل: {total_sum}",
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    )
+
+    return S_MAIN
 
 # Admin add product flows
 async def admin_add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
