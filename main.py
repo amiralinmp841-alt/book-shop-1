@@ -48,6 +48,28 @@ ORDERS_FILE = DATA_DIR / "orders.json"            # finalized but unpaid
 PENDING_PAYMENTS_FILE = DATA_DIR / "pending_payments.json"
 PURCHASES_FILE = DATA_DIR / "purchases.json"      # approved purchases
 BLOCKED_FILE = DATA_DIR / "blocked.json"
+backup_group_id = os.getenv("BACKUP_GROUP_ID")
+PHOTO_GROUP_ID = os.getenv("PHOTO_GROUP_ID")
+
+# ----------- گروه دریافت فیش --------------
+#def get_PHOTO_GROUP_ID():
+#    gid = os.getenv("PHOTO_GROUP_ID")
+#    if not gid:
+#        return None
+#    try:
+#        return int(gid)
+#    except ValueError:
+#        return None
+
+# خواندن لیست ادمین‌ها از متغیر محیطی
+ADMIN_IDS = []
+if os.getenv("ADMIN_IDS"):
+    ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS").split(",")))
+
+# بررسی اینکه حداقل یک ادمین تعریف شده
+if not ADMIN_IDS:
+    print("Error: ADMIN_IDS not set in environment variables.")
+    exit(1)
 
 # ---------------- LOG ----------------
 logging.basicConfig(level=logging.INFO)
@@ -629,40 +651,45 @@ async def buy_enter_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return S_MAIN
 
 # Handle receipt photo upload (or forwarding photo messages to admin when not paying)
+import os
+
 async def handle_photo_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     ensure_user(uid)
-    # If user has selected an order to pay
+
     order_id = context.user_data.get('pay_order_id')
-    if order_id:
-        # store pending payment
-        file_id = update.message.photo[-1].file_id
-        pay_id = str(uuid.uuid4())
-        # find order
-        user_orders = orders.get(str(uid), [])
-        sel_order = None
-        for ord in user_orders:
-            if ord.get("order_id") == order_id:
-                sel_order = ord
-                break
-        if not sel_order:
-            await update.message.reply_text("سفارش یافت نشد یا قبلاً پردازش شده است.", reply_markup=user_main_keyboard(True))
-            context.user_data.pop('pay_order_id', None)
-            return S_MAIN
-        pending_payments[pay_id] = {
-            "payment_id": pay_id,
-            "user_id": uid,
-            "first_name": users[str(uid)].get("first_name"),
-            "last_name": users[str(uid)].get("last_name"),
-            "is_dorm": users[str(uid)].get("is_dorm"),
-            "dorm_name": users[str(uid)].get("dorm_name"),
-            "order_id": order_id,
-            "items": sel_order.get("items", []),
-            "total": sel_order.get("total", 0),
-            "file_id": file_id,
-            "timestamp": datetime.datetime.utcnow().isoformat(),
-            "status": "pending",
-        }
+    if not order_id:
+        return S_MAIN
+
+    file_id = update.message.photo[-1].file_id
+    pay_id = str(uuid.uuid4())
+
+    user_orders = orders.get(str(uid), [])
+    sel_order = next((o for o in user_orders if o.get("order_id") == order_id), None)
+
+    if not sel_order:
+        await update.message.reply_text(
+            "سفارش یافت نشد یا قبلاً پردازش شده است.",
+            reply_markup=user_main_keyboard(True)
+        )
+        context.user_data.pop('pay_order_id', None)
+        return S_MAIN
+
+    pending_payments[pay_id] = {
+        "payment_id": pay_id,
+        "user_id": uid,
+        "first_name": users[str(uid)].get("first_name"),
+        "last_name": users[str(uid)].get("last_name"),
+        "is_dorm": users[str(uid)].get("is_dorm"),
+        "dorm_name": users[str(uid)].get("dorm_name"),
+        "order_id": order_id,
+        "items": sel_order.get("items", []),
+        "total": sel_order.get("total", 0),
+        "file_id": file_id,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "status": "pending",
+    }
+
     persist_all()
 
     caption = (
@@ -680,16 +707,36 @@ async def handle_photo_receipt(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("↩️ پاسخ دادن", callback_data=f"reply_user:{uid}")]
     ])
 
-    # ✅ ارسال فیش به همه ادمین‌ها (اصلی + فرعی)
-    all_admins = [ADMIN_ID] + admins
-    for admin_id in all_admins:
+    sent = False
+
+    if PHOTO_GROUP_ID:
         try:
-            await context.bot.send_photo(chat_id=admin_id, photo=file_id, caption=caption, reply_markup=kb)
+            await context.bot.send_photo(
+                chat_id=int(PHOTO_GROUP_ID),
+                photo=file_id,
+                caption=caption,
+                reply_markup=kb
+            )
+            sent = True
         except Exception as e:
-            print(f"⚠️ ارسال فیش به ادمین {admin_id} ناموفق بود: {e}")
+            print(f"⚠️ ارسال به گروه ناموفق بود: {e}")
+
+    # fallback اگر گروه ست نبود یا ارسال شکست خورد
+    if not sent:
+        all_admins = [ADMIN_ID] + admins
+        for admin_id in all_admins:
+            try:
+                await context.bot.send_photo(
+                    chat_id=admin_id,
+                    photo=file_id,
+                    caption=caption,
+                    reply_markup=kb
+                )
+            except Exception as e:
+                print(f"⚠️ ارسال فیش به ادمین {admin_id} ناموفق بود: {e}")
 
     await update.message.reply_text(
-        "✅ فیش شما ارسال شد و در انتظار تایید ادمین می‌باشد.",
+        "✅ فیش شما ارسال شد و در انتظار تایید می‌باشد.",
         reply_markup=user_main_keyboard(True)
     )
 
@@ -1659,23 +1706,51 @@ import asyncio
 
 async def auto_backup():
     while True:
-        import zipfile, io
         buf = io.BytesIO()
+
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
-            for f in [USERS_FILE, PRODUCTS_FILE, ORDERS_FILE, PENDING_PAYMENTS_FILE, PURCHASES_FILE, BLOCKED_FILE]:
+            for f in [
+                USERS_FILE,
+                PRODUCTS_FILE,
+                ORDERS_FILE,
+                PENDING_PAYMENTS_FILE,
+                PURCHASES_FILE,
+                BLOCKED_FILE
+            ]:
                 if f.exists():
                     z.write(f, arcname=f.name)
+
         buf.seek(0)
-        try:
-            await application.bot.send_document(
-                chat_id=ADMIN_ID,
-                document=buf,
-                filename="auto_backup.zip",
-                caption="📦 بکاپ خودکار هر 1 دقیقه",
-            )
-        except Exception as e:
-            logger.warning(f"Auto backup failed: {e}")
-        await asyncio.sleep(60)  # ۱ دقیقه
+
+        sent = False
+
+        # ✅ تلاش برای ارسال به گروه بکاپ
+        if backup_group_id:
+            try:
+                await application.bot.send_document(
+                    chat_id=int(backup_group_id),
+                    document=buf,
+                    filename="auto_backup.zip",
+                    caption="📦 بکاپ خودکار هر 1 دقیقه",
+                )
+                sent = True
+            except Exception as e:
+                logger.warning(f"ارسال بکاپ به گروه ناموفق بود: {e}")
+
+        # ✅ fallback اگر ENV ست نبود یا ارسال شکست خورد
+        if not sent:
+            try:
+                buf.seek(0)  # مهم! چون قبلاً مصرف شده
+                await application.bot.send_document(
+                    chat_id=ADMIN_ID,
+                    document=buf,
+                    filename="auto_backup.zip",
+                    caption="📦 بکاپ خودکار هر 1 دقیقه (Fallback)",
+                )
+            except Exception as e:
+                logger.warning(f"Auto backup failed completely: {e}")
+
+        await asyncio.sleep(60)  # هر 1 دقیقه
 
 
 @fastapi_app.on_event("startup")
