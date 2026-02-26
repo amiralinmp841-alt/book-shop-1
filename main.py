@@ -39,7 +39,7 @@ from telegram.ext import (
 
 # ---------------- CONFIG ----------------
 TOKEN = os.getenv("BOT_TOKEN")
-#ADMIN_IDS = int(os.getenv("ADMIN_IDS", "0"))  # پیش‌فرض ۰ اگه ست نشده باشه
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # پیش‌فرض ۰ اگه ست نشده باشه
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 USERS_FILE = DATA_DIR / "users.json"
@@ -48,28 +48,6 @@ ORDERS_FILE = DATA_DIR / "orders.json"            # finalized but unpaid
 PENDING_PAYMENTS_FILE = DATA_DIR / "pending_payments.json"
 PURCHASES_FILE = DATA_DIR / "purchases.json"      # approved purchases
 BLOCKED_FILE = DATA_DIR / "blocked.json"
-backup_group_id = os.getenv("BACKUP_GROUP_ID")
-
-# ----------- گروه دریافت فیش --------------
-def get_PHOTO_GROUP_ID():
-    gid = os.getenv("PHOTO_GROUP_ID")
-    if not gid:
-        return None
-    try:
-        return int(gid)
-    except ValueError:
-        return None
-PHOTO_GROUP_ID = os.getenv("PHOTO_GROUP_ID")
-
-# خواندن لیست ادمین‌ها از متغیر محیطی
-ADMIN_IDS = []
-if os.getenv("ADMIN_IDS"):
-    ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS").split(",")))
-
-# بررسی اینکه حداقل یک ادمین تعریف شده
-if not ADMIN_IDS:
-    print("Error: ADMIN_IDS not set in environment variables.")
-    exit(1)
 
 # ---------------- LOG ----------------
 logging.basicConfig(level=logging.INFO)
@@ -108,16 +86,21 @@ FILES_TO_BACKUP = [
     PURCHASES_FILE,
     BLOCKED_FILE
 ]
+
 async def send_backup_now():
     backup_group_id = os.getenv("BACKUP_GROUP_ID")
     if not backup_group_id:
         return
+
     buf = io.BytesIO()
+
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
         for f in FILES_TO_BACKUP:
             if f.exists():
                 z.write(f, arcname=f.name)
+
     buf.seek(0)
+
     try:
         await application.bot.send_document(
             chat_id=int(backup_group_id),
@@ -141,6 +124,7 @@ def save_json(path: Path, data):
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
+
     # 🔥 بعد از هر ذخیره → بکاپ فوری
     try:
         asyncio.get_running_loop().create_task(send_backup_now())
@@ -175,7 +159,7 @@ def persist_all():
 # --- 🔽 تابع کمکی برای تشخیص ادمین ---
 def is_admin(uid: int) -> bool:
     """بررسی می‌کند که آیا کاربر، ادمین اصلی یا یکی از ادمین‌های اضافه‌شده است یا نه"""
-    return uid == ADMIN_IDS or uid in admins
+    return uid == ADMIN_ID or uid in admins
 # --- 🔼 پایان تابع ---
 
 
@@ -303,7 +287,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-0-0 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -322,7 +306,7 @@ async def handle_text_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
 
     # If user is in "chat with admin" mode, forward messages to admin (except back)
-    if uid != ADMIN_IDS and context.user_data.get('chat_with_admin'):
+    if uid != ADMIN_ID and context.user_data.get('chat_with_admin'):
         if text == "🔙 بازگشت":
             context.user_data.pop('chat_with_admin', None)
             await update.message.reply_text("چت با ادمین لغو شد.", reply_markup=user_main_keyboard(has_identity))
@@ -330,12 +314,12 @@ async def handle_text_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # forward text to admin with reply button
         caption = f"پیام از {make_disp_name(users[str(uid)])} — id:{uid}\n\n{text}"
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پاسخ دادن", callback_data=f"reply_user:{uid}")]])
-        await context.bot.send_message(chat_id=ADMIN_IDS, text=caption, reply_markup=kb)
+        await context.bot.send_message(chat_id=ADMIN_ID, text=caption, reply_markup=kb)
         await update.message.reply_text("پیام شما به ادمین ارسال شد.", reply_markup=user_main_keyboard(has_identity))
         return S_MAIN
 
     # require registration
-    if uid != ADMIN_IDS and not has_identity and text not in ("📝 ثبت اطلاعات هویتی", "🔙 بازگشت"):
+    if uid != ADMIN_ID and not has_identity and text not in ("📝 ثبت اطلاعات هویتی", "🔙 بازگشت"):
         await update.message.reply_text("لطفا ابتدا اطلاعات هویتی خود را ثبت کنید.", reply_markup=user_main_keyboard(False))
         return S_MAIN
 
@@ -551,7 +535,7 @@ async def register_dorm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users[key]['dorm_name'] = None
         await update.message.reply_text("اطلاعات هویتی تکمیل شد ✅️", reply_markup=user_main_keyboard(True))
         msg = f"کاربری ثبت نام کرد: {make_disp_name(users[key])} — آیدی: {uid}"
-        await context.bot.send_message(chat_id=ADMIN_IDS, text=msg)
+        await context.bot.send_message(chat_id=ADMIN_ID, text=msg)
         persist_all()
         if 'old_identity' in context.user_data:
             old = context.user_data.pop('old_identity')
@@ -580,7 +564,7 @@ async def register_other_dorm_name(update: Update, context: ContextTypes.DEFAULT
     users[key]['dorm_name'] = text
     await update.message.reply_text("اطلاعات هویتی تکمیل شد ✅️", reply_markup=user_main_keyboard(True))
     msg = f"کاربری ثبت نام کرد: {make_disp_name(users[key])} — آیدی: {uid}"
-    await context.bot.send_message(chat_id=ADMIN_IDS, text=msg)
+    await context.bot.send_message(chat_id=ADMIN_ID, text=msg)
     persist_all()
     if 'old_identity' in context.user_data:
         old = context.user_data.pop('old_identity')
@@ -598,7 +582,7 @@ async def notify_admin_edit(uid: int, old: dict, new: dict, context: ContextType
         f"اسم خود را از \"{old_name}\" ➝ \"{new_name}\" تغییر داد\n"
         f"خوابگاه خود را از \"{old_dorm}\" ➝ \"{new_dorm}\""
     )
-    await context.bot.send_message(chat_id=ADMIN_IDS, text=text)
+    await context.bot.send_message(chat_id=ADMIN_ID, text=text)
 
 # Buying flow
 async def buy_select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -747,6 +731,9 @@ async def handle_photo_receipt(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("↩️ پاسخ دادن", callback_data=f"reply_user:{uid}")]
     ])
 
+    # گرفتن آیدی گروه از ENV
+    PHOTO_GROUP_ID = os.getenv("PHOTO_GROUP_ID")
+
     sent = False
 
     if PHOTO_GROUP_ID:
@@ -763,17 +750,17 @@ async def handle_photo_receipt(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # fallback اگر گروه ست نبود یا ارسال شکست خورد
     if not sent:
-        all_admins = [ADMIN_IDS] + admins
-        for ADMIN_IDS in all_admins:
+        all_admins = [ADMIN_ID] + admins
+        for admin_id in all_admins:
             try:
                 await context.bot.send_photo(
-                    chat_id=ADMIN_IDS,
+                    chat_id=admin_id,
                     photo=file_id,
                     caption=caption,
                     reply_markup=kb
                 )
             except Exception as e:
-                print(f"⚠️ ارسال فیش به ادمین {ADMIN_IDS} ناموفق بود: {e}")
+                print(f"⚠️ ارسال فیش به ادمین {admin_id} ناموفق بود: {e}")
 
     await update.message.reply_text(
         "✅ فیش شما ارسال شد و در انتظار تایید می‌باشد.",
@@ -946,7 +933,7 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return S_MAIN
 
     # ✅ ارسال برای تمام ادمین‌ها (اصلی + فرعی)
-        all_admins = [ADMIN_IDS] + admins
+        all_admins = [ADMIN_ID] + admins
 
         for pay_id, pay in pending_payments.items():
             if pay.get("status") != "pending":
@@ -958,11 +945,11 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("↩️ پاسخ دادن", callback_data=f"reply_user:{pay.get('user_id')}")]
             ])
             # ارسال فیش برای همه ادمین‌ها
-            for ADMIN_IDS in all_admins:
+            for admin_id in all_admins:
                 try:
-                    await context.bot.send_photo(chat_id=ADMIN_IDS, photo=pay.get('file_id'), caption=caption, reply_markup=kb)
+                    await context.bot.send_photo(chat_id=admin_id, photo=pay.get('file_id'), caption=caption, reply_markup=kb)
                 except Exception as e:
-                    print(f"⚠️ ارسال فیش به ادمین {ADMIN_IDS} ناموفق بود: {e}")
+                    print(f"⚠️ ارسال فیش به ادمین {admin_id} ناموفق بود: {e}")
 
         await update.message.reply_text("📨 تمام فیش‌های در انتظار برای همه ادمین‌ها ارسال شدند.", reply_markup=admin_main_keyboard())
         return S_MAIN
@@ -997,12 +984,12 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         df.to_excel(path, index=False)
 
     # ✅ ارسال فایل برای همه ادمین‌ها
-        all_admins = [ADMIN_IDS] + admins
-        for ADMIN_IDS in all_admins:
+        all_admins = [ADMIN_ID] + admins
+        for admin_id in all_admins:
             try:
-                await context.bot.send_document(chat_id=ADMIN_IDS, document=path.open('rb'))
+                await context.bot.send_document(chat_id=admin_id, document=path.open('rb'))
             except Exception as e:
-                print(f"⚠️ ارسال فایل اکسل به ادمین {ADMIN_IDS} ناموفق بود: {e}")
+                print(f"⚠️ ارسال فایل اکسل به ادمین {admin_id} ناموفق بود: {e}")
 
         await update.message.reply_text("📊 فایل اکسل خرید جزوات برای تمام ادمین‌ها ارسال شد.", reply_markup=admin_main_keyboard())
         return S_MAIN
@@ -1156,7 +1143,7 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if f.exists():
                     z.write(f, arcname=f.name)
         buf.seek(0)
-        await context.bot.send_document(chat_id=ADMIN_IDS, document=buf, filename="backup.zip")
+        await context.bot.send_document(chat_id=ADMIN_ID, document=buf, filename="backup.zip")
         await update.message.reply_text("📤 فایل بکاپ ارسال شد.", reply_markup=admin_main_keyboard())
         return S_MAIN
 
@@ -1168,7 +1155,7 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- 🔽 بخش جدید: مدیریت ادمین‌ها ---
     if text == "⚙️ مدیریت ادمین‌ها":
-        if update.effective_user.id != ADMIN_IDS and update.effective_user.id not in admins:
+        if update.effective_user.id != ADMIN_ID and update.effective_user.id not in admins:
             await update.message.reply_text("❌ فقط ادمین اصلی به این بخش دسترسی دارد.")
             return S_MAIN
 
@@ -1647,18 +1634,18 @@ async def handle_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
         return S_MAIN
 
     try:
-        ADMIN_IDS = int(text)
+        admin_id = int(text)
     except ValueError:
         await update.message.reply_text("❌ مقدار وارد شده معتبر نیست.", reply_markup=back_kb())
         return "S_REMOVE_ADMIN"
 
-    if ADMIN_IDS not in admins:
+    if admin_id not in admins:
         await update.message.reply_text("⚠️ چنین ادمینی وجود ندارد.", reply_markup=admin_main_keyboard())
         return S_MAIN
 
-    admins.remove(ADMIN_IDS)
+    admins.remove(admin_id)
     persist_all()
-    await update.message.reply_text(f"🚫 ادمین {ADMIN_IDS} حذف شد و به کاربر عادی تبدیل گردید.", reply_markup=admin_main_keyboard())
+    await update.message.reply_text(f"🚫 ادمین {admin_id} حذف شد و به کاربر عادی تبدیل گردید.", reply_markup=admin_main_keyboard())
     return S_MAIN
 # --- 🔼 پایان کد جدید ---
 
@@ -1692,7 +1679,7 @@ def setup_handlers_for_web(application):
         states={
             S_MAIN: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_main),
-                MessageHandler(filters.Document.ALL & filters.User(ADMIN_IDS), handle_backup_file),
+                MessageHandler(filters.Document.ALL & filters.User(ADMIN_ID), handle_backup_file),
             ],
             S_REGISTER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_name)],
             S_REGISTER_DORM: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_dorm)],
@@ -1732,9 +1719,9 @@ def setup_handlers_for_web(application):
         if not is_admin(uid):
             return
         return
-    application.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_IDS), admin_text_router))
-    application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_IDS), admin_text_router))
-    application.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.User(ADMIN_IDS), lambda u,c: None))
+    application.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_ID), admin_text_router))
+    application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_text_router))
+    application.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.User(ADMIN_ID), lambda u,c: None))
     return application
 
 # Register handlers
@@ -1742,12 +1729,13 @@ application = setup_handlers_for_web(application)
 
 # FastAPI lifecycle events
 
+import os
+import zipfile
+import io
 import asyncio
 
 async def auto_backup():
     while True:
-        await asyncio.sleep(60)
-
         buf = io.BytesIO()
 
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
@@ -1765,8 +1753,9 @@ async def auto_backup():
         buf.seek(0)
 
         backup_group_id = os.getenv("BACKUP_GROUP_ID")
+        sent = False
 
-        # ✅ ارسال به گروه بکاپ
+        # ✅ تلاش برای ارسال به گروه بکاپ
         if backup_group_id:
             try:
                 await application.bot.send_document(
@@ -1775,22 +1764,24 @@ async def auto_backup():
                     filename="auto_backup.zip",
                     caption="📦 بکاپ خودکار هر 1 دقیقه",
                 )
-                continue  # اگر موفق بود، fallback نرو
+                sent = True
             except Exception as e:
-                logger.warning(f"ارسال به گروه ناموفق بود: {e}")
+                logger.warning(f"ارسال بکاپ به گروه ناموفق بود: {e}")
 
-        # ✅ fallback → ارسال به هر ادمین جداگانه
-        for admin_id in ADMIN_IDS:
+        # ✅ fallback اگر ENV ست نبود یا ارسال شکست خورد
+        if not sent:
             try:
-                buf.seek(0)
+                buf.seek(0)  # مهم! چون قبلاً مصرف شده
                 await application.bot.send_document(
-                    chat_id=admin_id,
+                    chat_id=ADMIN_ID,
                     document=buf,
                     filename="auto_backup.zip",
-                    caption="📦 بکاپ خودکار (Fallback)",
+                    caption="📦 بکاپ خودکار هر 1 دقیقه (Fallback)",
                 )
             except Exception as e:
-                logger.warning(f"ارسال به ادمین {admin_id} ناموفق بود: {e}")
+                logger.warning(f"Auto backup failed completely: {e}")
+
+        await asyncio.sleep(60)  # هر 1 دقیقه
 
 
 @fastapi_app.on_event("startup")
