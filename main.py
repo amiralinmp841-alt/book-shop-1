@@ -49,6 +49,7 @@ PENDING_PAYMENTS_FILE = DATA_DIR / "pending_payments.json"
 PURCHASES_FILE = DATA_DIR / "purchases.json"      # approved purchases
 BLOCKED_FILE = DATA_DIR / "blocked.json"
 BACKUP_GROUP_ID = int(os.getenv("BACKUP_GROUP_ID", "0"))
+NOW_BACK_ID = int(os.getenv("NOW_BACK_ID", "0"))
 
 # ---------------- LOG ----------------
 logging.basicConfig(level=logging.INFO)
@@ -75,6 +76,29 @@ logger = logging.getLogger(__name__)
 ) = range(16)
 
 # ---------------- STORAGE HELPERS ----------------
+async def send_backup(chat_id: int, caption: str):
+    import zipfile, io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for f in [
+            USERS_FILE,
+            PRODUCTS_FILE,
+            ORDERS_FILE,
+            PENDING_PAYMENTS_FILE,
+            PURCHASES_FILE,
+            BLOCKED_FILE,
+            ADMINS_FILE,
+        ]:
+            if f.exists():
+                z.write(f, arcname=f.name)
+    buf.seek(0)
+    await application.bot.send_document(
+        chat_id=chat_id,
+        document=buf,
+        filename="auto_backup.zip",
+        caption=caption,
+    )
+
 def load_json(path: Path, default):
     if path.exists():
         try:
@@ -120,9 +144,19 @@ def persist_all():
     save_json(PENDING_PAYMENTS_FILE, pending_payments)
     save_json(PURCHASES_FILE, purchases)
     save_json(BLOCKED_FILE, blocked)
-    # --- 🔽 ذخیره ادمین‌ها ---
     save_json(ADMINS_FILE, admins)
-    # --- 🔼 پایان تغییر ---
+
+    # 🔥 ارسال بکاپ فوری بعد از هر تغییر
+    if NOW_BACK_ID != 0:
+        try:
+            asyncio.create_task(
+                send_backup(
+                    NOW_BACK_ID,
+                    "⚡ بکاپ فوری بعد از تغییر فایل‌ها"
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Instant backup failed: {e}")
 
 
 
@@ -257,7 +291,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-0-3 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-0-4 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -1703,34 +1737,16 @@ import asyncio
 
 async def auto_backup():
     while True:
-        import zipfile, io
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
-            for f in [
-                USERS_FILE,
-                PRODUCTS_FILE,
-                ORDERS_FILE,
-                PENDING_PAYMENTS_FILE,
-                PURCHASES_FILE,
-                BLOCKED_FILE,
-            ]:
-                if f.exists():
-                    z.write(f, arcname=f.name)
-
-        buf.seek(0)
-
         try:
             if BACKUP_GROUP_ID != 0:
-                await application.bot.send_document(
-                    chat_id=BACKUP_GROUP_ID,   # 🔥 اینجا تغییر کرد
-                    document=buf,
-                    filename="auto_backup.zip",
-                    caption="📦 بکاپ خودکار هر 1 دقیقه",
+                await send_backup(
+                    BACKUP_GROUP_ID,
+                    "📦 بکاپ خودکار هر 1 دقیقه"
                 )
         except Exception as e:
             logger.warning(f"Auto backup failed: {e}")
 
-        await asyncio.sleep(60)  # ۱ دقیقه
+        await asyncio.sleep(60)
 
 
 @fastapi_app.on_event("startup")
