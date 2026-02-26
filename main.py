@@ -1342,7 +1342,8 @@ async def admin_add_bw_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
             ],
             resize_keyboard=True
         )
-    )    return S_ADMIN_ADD_CHOOSE
+    )    
+    return S_ADMIN_ADD_CHOOSE
 
 # Admin list and delete product
 async def admin_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
