@@ -146,14 +146,16 @@ def persist_all():
     save_json(BLOCKED_FILE, blocked)
     save_json(ADMINS_FILE, admins)
 
-    # 🔥 ارسال بکاپ فوری بعد از هر تغییر
     if NOW_BACK_ID != 0:
         try:
-            asyncio.create_task(
-                send_backup(
-                    NOW_BACK_ID,
-                    "⚡ بکاپ فوری بعد از تغییر فایل‌ها"
-                )
+            application.job_queue.run_once(
+                lambda ctx: ctx.application.create_task(
+                    send_backup(
+                        NOW_BACK_ID,
+                        "⚡ بکاپ فوری بعد از تغییر فایل‌ها"
+                    )
+                ),
+                when=0
             )
         except Exception as e:
             logger.warning(f"Instant backup failed: {e}")
@@ -291,7 +293,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-0-4 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-0-7 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -1733,22 +1735,6 @@ application = setup_handlers_for_web(application)
 
 # FastAPI lifecycle events
 
-import asyncio
-
-async def auto_backup():
-    while True:
-        try:
-            if BACKUP_GROUP_ID != 0:
-                await send_backup(
-                    BACKUP_GROUP_ID,
-                    "📦 بکاپ خودکار هر 1 دقیقه"
-                )
-        except Exception as e:
-            logger.warning(f"Auto backup failed: {e}")
-
-        await asyncio.sleep(60)
-
-
 @fastapi_app.on_event("startup")
 async def on_startup():
     try:
@@ -1757,16 +1743,30 @@ async def on_startup():
         if WEBHOOK_URL:
             await application.bot.set_webhook(WEBHOOK_URL)
             await application.start()
-            application.create_task(auto_backup())
+            setup_jobs()
+
             logger.info("✅ Webhook set to %s and bot started", WEBHOOK_URL)
         else:
             # No webhook configured: we'll initialize but not set webhook (useful for local dev)
             await application.start()
-            application.create_task(auto_backup())
+            #application.create_task(auto_backup())
             logger.info("No WEBHOOK_URL set. Bot started without webhook (use polling locally if desired).")
     except Exception as e:
         logger.exception("Failed to start bot on startup: %s", e)
         raise
+
+def setup_jobs():
+    if BACKUP_GROUP_ID != 0:
+        application.job_queue.run_repeating(
+            lambda ctx: ctx.application.create_task(
+                send_backup(
+                    BACKUP_GROUP_ID,
+                    "📦 بکاپ خودکار هر 1 دقیقه"
+                )
+            ),
+            interval=60,
+            first=5
+        )
 
 @fastapi_app.on_event("shutdown")
 async def on_shutdown():
@@ -1779,12 +1779,12 @@ async def on_shutdown():
 
 # ----------------------------- Telegram Webhook -----------------------------
 # ----------------------------- Telegram Webhook -----------------------------
+from fastapi import Request
+
 @fastapi_app.post("/webhook")
 async def telegram_webhook(request: Request):
-    if not WEBHOOK_URL:
-        logger.warning("Received webhook call but WEBHOOK_URL not configured - processing anyway")
-    body = await request.json()
-    update = Update.de_json(body, application.bot)
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
     await application.process_update(update)
     return {"ok": True}
 
@@ -1809,6 +1809,7 @@ if __name__ == "__main__":
         async def run_polling_local():
             await application.initialize()
             await application.start()
+            setup_jobs()
             await application.run_polling()
 
         asyncio.run(run_polling_local())
