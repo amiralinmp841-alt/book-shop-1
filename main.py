@@ -49,17 +49,17 @@ PENDING_PAYMENTS_FILE = DATA_DIR / "pending_payments.json"
 PURCHASES_FILE = DATA_DIR / "purchases.json"      # approved purchases
 BLOCKED_FILE = DATA_DIR / "blocked.json"
 backup_group_id = os.getenv("BACKUP_GROUP_ID")
-PHOTO_GROUP_ID = os.getenv("PHOTO_GROUP_ID")
 
 # ----------- گروه دریافت فیش --------------
-#def get_PHOTO_GROUP_ID():
-#    gid = os.getenv("PHOTO_GROUP_ID")
-#    if not gid:
-#        return None
-#    try:
-#        return int(gid)
-#    except ValueError:
-#        return None
+def get_PHOTO_GROUP_ID():
+    gid = os.getenv("PHOTO_GROUP_ID")
+    if not gid:
+        return None
+    try:
+        return int(gid)
+    except ValueError:
+        return None
+PHOTO_GROUP_ID = os.getenv("PHOTO_GROUP_ID")
 
 # خواندن لیست ادمین‌ها از متغیر محیطی
 ADMIN_IDS = []
@@ -1746,6 +1746,8 @@ import asyncio
 
 async def auto_backup():
     while True:
+        await asyncio.sleep(60)
+
         buf = io.BytesIO()
 
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
@@ -1762,9 +1764,9 @@ async def auto_backup():
 
         buf.seek(0)
 
-        sent = False
+        backup_group_id = os.getenv("BACKUP_GROUP_ID")
 
-        # ✅ تلاش برای ارسال به گروه بکاپ
+        # ✅ ارسال به گروه بکاپ
         if backup_group_id:
             try:
                 await application.bot.send_document(
@@ -1773,24 +1775,22 @@ async def auto_backup():
                     filename="auto_backup.zip",
                     caption="📦 بکاپ خودکار هر 1 دقیقه",
                 )
-                sent = True
+                continue  # اگر موفق بود، fallback نرو
             except Exception as e:
-                logger.warning(f"ارسال بکاپ به گروه ناموفق بود: {e}")
+                logger.warning(f"ارسال به گروه ناموفق بود: {e}")
 
-        # ✅ fallback اگر ENV ست نبود یا ارسال شکست خورد
-        if not sent:
+        # ✅ fallback → ارسال به هر ادمین جداگانه
+        for admin_id in ADMIN_IDS:
             try:
-                buf.seek(0)  # مهم! چون قبلاً مصرف شده
+                buf.seek(0)
                 await application.bot.send_document(
-                    chat_id=ADMIN_IDS,
+                    chat_id=admin_id,
                     document=buf,
                     filename="auto_backup.zip",
-                    caption="📦 بکاپ خودکار هر 1 دقیقه (Fallback)",
+                    caption="📦 بکاپ خودکار (Fallback)",
                 )
             except Exception as e:
-                logger.warning(f"Auto backup failed completely: {e}")
-
-        await asyncio.sleep(60)  # هر 1 دقیقه
+                logger.warning(f"ارسال به ادمین {admin_id} ناموفق بود: {e}")
 
 
 @fastapi_app.on_event("startup")
