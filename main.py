@@ -262,7 +262,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-1-2 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-1-4 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -1104,7 +1104,7 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # clicked on buyer
     # clicked on buyer
-# clicked on buyer
+    # clicked on buyer
     if 'buyers_map' in context.user_data and text in context.user_data['buyers_map']:
     
         the_uid = context.user_data['buyers_map'][text]
@@ -1127,20 +1127,24 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if idx >= len(items_map):
             return S_MAIN
     
-        item_info = items_map[idx]
+        item = items_map[idx]
     
-        title = item_info["title"]
-        typ = item_info["type"]
+        buyer_uid = context.user_data.get("selected_buyer")
     
-        # حذف فقط یک آیتم
+        # حذف فقط همان آیتم
         for uid_k in list(purchases.keys()):
     
             for pur in purchases[uid_k]:
+    
                 for i in range(len(pur["items"]) - 1, -1, -1):
     
                     it = pur["items"][i]
     
-                    if it["title"] == title and it["type"] == typ:
+                    if (
+                        it.get("title") == item["title"] and
+                        it.get("type") == item["type"] and
+                        it.get("unit_price") == item["unit_price"]
+                    ):
                         pur["items"].pop(i)
                         break
     
@@ -1154,8 +1158,7 @@ async def handle_admin_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
         persist_all()
     
-        # ⭐ نمایش مجدد همان پنل
-        buyer_uid = context.user_data.get("selected_buyer")
+        # ⭐ صفحه همان خریدار دوباره نمایش داده شود
         if buyer_uid:
             await show_buyer_purchase_panel(update, context, buyer_uid)
     
@@ -1323,29 +1326,38 @@ async def show_buyer_purchase_panel(update, context, buyer_uid):
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
-async def admin_show_buyer_panel(update, context, buyer_uid):
+async def show_buyer_purchase_panel(update, context, buyer_uid):
 
     pur_list = purchases.get(str(buyer_uid), [])
 
+    if not pur_list:
+        await update.message.reply_text(
+            "این کاربر خرید تاییدشده‌ای ندارد.",
+            reply_markup=admin_main_keyboard()
+        )
+        return
+
     lines = []
     kb = []
+    items_map = []
 
     total_sum = 0
 
-    items_map = []
-
+    # ⭐ آیتم‌ها را با ID جداگانه نمایش بده
     for pur in pur_list:
         for it in pur.get("items", []):
 
-            lines.append(f"- {it['title']} ({it['type']}) x {it['qty']}")
+            # اگر item_id ندارد → بساز
+            if "item_id" not in it:
+                it["item_id"] = str(uuid.uuid4())
 
-            items_map.append({
-                "buyer_uid": buyer_uid,
-                "title": it["title"],
-                "type": it["type"]
-            })
+            items_map.append(it)
 
             idx = len(items_map) - 1
+
+            lines.append(
+                f"{idx}. {it['title']} {it['type']} x {it['qty']}"
+            )
 
             kb.append([
                 KeyboardButton(f"🗑 حذف آیتم {idx}")
@@ -1354,18 +1366,18 @@ async def admin_show_buyer_panel(update, context, buyer_uid):
             total_sum += it["qty"] * it["unit_price"]
 
     context.user_data["buyer_items_map"] = items_map
+    context.user_data["selected_buyer"] = buyer_uid
 
     kb.append([KeyboardButton("🗑 حذف همه خریدهای کاربر")])
     kb.append([KeyboardButton("💬 چت با کاربر")])
     kb.append([KeyboardButton("🔙 بازگشت")])
 
     await update.message.reply_text(
-        "\n".join(lines) +
-        f"\n\nجمع کل: {total_sum}",
+        f"خریدهای {make_disp_name(users.get(str(buyer_uid), {}))}:\n\n"
+        + "\n".join(lines)
+        + f"\n\nجمع کل: {total_sum}",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
-
-    return S_MAIN
 
 # Admin add product flows
 async def admin_add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
