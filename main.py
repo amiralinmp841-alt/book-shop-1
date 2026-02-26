@@ -48,6 +48,7 @@ ORDERS_FILE = DATA_DIR / "orders.json"            # finalized but unpaid
 PENDING_PAYMENTS_FILE = DATA_DIR / "pending_payments.json"
 PURCHASES_FILE = DATA_DIR / "purchases.json"      # approved purchases
 BLOCKED_FILE = DATA_DIR / "blocked.json"
+BACKUP_GROUP_ID = int(os.getenv("BACKUP_GROUP_ID", "0"))
 
 # ---------------- LOG ----------------
 logging.basicConfig(level=logging.INFO)
@@ -256,7 +257,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(uid)
     has_identity = bool(users[str(uid)].get("first_name") and users[str(uid)].get("last_name"))
     if is_admin(uid):
-        await update.message.reply_text("خوش آمدی ادمین V-1-0-2 ", reply_markup=admin_main_keyboard())
+        await update.message.reply_text("خوش آمدی ادمین V-1-0-3 ", reply_markup=admin_main_keyboard())
     else:
         await update.message.reply_text("سلام! به ربات سفارش جزوه خوش آمدید.", reply_markup=user_main_keyboard(has_identity))
     persist_all()
@@ -1705,19 +1706,30 @@ async def auto_backup():
         import zipfile, io
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
-            for f in [USERS_FILE, PRODUCTS_FILE, ORDERS_FILE, PENDING_PAYMENTS_FILE, PURCHASES_FILE, BLOCKED_FILE]:
+            for f in [
+                USERS_FILE,
+                PRODUCTS_FILE,
+                ORDERS_FILE,
+                PENDING_PAYMENTS_FILE,
+                PURCHASES_FILE,
+                BLOCKED_FILE,
+            ]:
                 if f.exists():
                     z.write(f, arcname=f.name)
+
         buf.seek(0)
+
         try:
-            await application.bot.send_document(
-                chat_id=ADMIN_ID,
-                document=buf,
-                filename="auto_backup.zip",
-                caption="📦 بکاپ خودکار هر 1 دقیقه",
-            )
+            if BACKUP_GROUP_ID != 0:
+                await application.bot.send_document(
+                    chat_id=BACKUP_GROUP_ID,   # 🔥 اینجا تغییر کرد
+                    document=buf,
+                    filename="auto_backup.zip",
+                    caption="📦 بکاپ خودکار هر 1 دقیقه",
+                )
         except Exception as e:
             logger.warning(f"Auto backup failed: {e}")
+
         await asyncio.sleep(60)  # ۱ دقیقه
 
 
